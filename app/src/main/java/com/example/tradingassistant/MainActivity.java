@@ -1,4 +1,3 @@
-
 package com.example.tradingassistant;
 
 import android.app.Activity;
@@ -6,395 +5,240 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.graphics.Typeface;
+import android.view.Gravity;
 import android.view.View;
+import android.view.inputmethod.EditorInfo;
 import android.widget.*;
-import org.json.*;
-import java.net.*;
-import java.io.*;
-import java.text.DecimalFormat;
-import java.util.concurrent.*;
+import android.text.InputType;
+import org.json.JSONObject;
+import org.json.JSONArray;
+import java.net.URL;
+import javax.net.ssl.HttpsURLConnection;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 
 public class MainActivity extends Activity {
-    LinearLayout root;
-    TextView priceText, analysisText, resultText, chatText;
-    EditText entry, target, account;
-    Spinner market, timeframe, direction;
-    ExecutorService executor = Executors.newSingleThreadExecutor();
-    Handler handler = new Handler(Looper.getMainLooper());
-    DecimalFormat df = new DecimalFormat("#,##0.########");
 
-    String[] symbols = {"BTCUSDT","ETHUSDT","SOLUSDT"};
-    String[] frames = {"1m","3m","5m","15m","30m","1h","4h","1d"};
+    LinearLayout main, chatBox;
+    EditText messageInput;
+    TextView priceView;
+    Handler handler = new Handler(Looper.getMainLooper());
+
+    String[] coins = {"BTCUSDT", "ETHUSDT", "SOLUSDT"};
 
     @Override
-    public void onCreate(Bundle b) {
-        super.onCreate(b);
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
 
         ScrollView scroll = new ScrollView(this);
-        root = new LinearLayout(this);
-        root.setOrientation(1);
-        root.setPadding(25,20,25,30);
-        root.setBackgroundColor(0xFFF5F7FA);
-        scroll.addView(root);
+        main = new LinearLayout(this);
+        main.setOrientation(LinearLayout.VERTICAL);
+        main.setPadding(18, 18, 18, 18);
+        main.setBackgroundColor(0xFF101820);
+        scroll.addView(main);
+
         setContentView(scroll);
 
-        TextView title = new TextView(this);
-        title.setText("TRADING ASSISTANT PRO");
-        title.setTextSize(25);
-        title.setTypeface(null, Typeface.BOLD);
-        add(title);
+        title("🤖 Trading Assistant");
 
-        label("অসমীয়া Trading Analysis • Paper Mode");
+        priceView = new TextView(this);
+        priceView.setTextColor(0xFF00E676);
+        priceView.setTextSize(16);
+        priceView.setPadding(8, 15, 8, 15);
+        main.addView(priceView);
 
-        label("Market");
-        market = spinner(symbols);
-        add(market);
+        Button refresh = button("🔄 Live Price Refresh");
+        main.addView(refresh);
+        refresh.setOnClickListener(v -> getPrices());
 
-        priceText = new TextView(this);
-        priceText.setTextSize(18);
-        add(priceText);
+        title("💬 AI Chat");
 
-        market.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
-            public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
-                loadPrice();
+        chatBox = new LinearLayout(this);
+        chatBox.setOrientation(LinearLayout.VERTICAL);
+        main.addView(chatBox);
+
+        addMessage("Assistant", "নমস্কাৰ! মই আপোনাৰ Trading Assistant। অসমীয়া বা English-ত প্ৰশ্ন কৰক।");
+
+        messageInput = new EditText(this);
+        messageInput.setSingleLine(false);
+        messageInput.setMinLines(2);
+        messageInput.setTextColor(0xFFFFFFFF);
+        messageInput.setHintTextColor(0xFFBBBBBB);
+        messageInput.setHint("ইয়াত লিখক / Type your message");
+        messageInput.setInputType(
+            InputType.TYPE_CLASS_TEXT |
+            InputType.TYPE_TEXT_FLAG_MULTI_LINE |
+            InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        );
+        messageInput.setImeOptions(EditorInfo.IME_ACTION_SEND);
+        messageInput.setBackgroundColor(0xFF263238);
+        main.addView(messageInput);
+
+        Button send = button("Send ➤");
+        main.addView(send);
+        send.setOnClickListener(v -> sendMessage());
+
+        title("📊 Paper Analysis");
+
+        EditText symbol = numberOrText("BTCUSDT / ETHUSDT / SOLUSDT");
+        main.addView(symbol);
+
+        EditText entry = numberOrText("Entry Price");
+        main.addView(entry);
+
+        EditText stop = numberOrText("Stop Loss");
+        main.addView(stop);
+
+        EditText target = numberOrText("Take Profit");
+        main.addView(target);
+
+        Button review = button("Review Paper Trade");
+        main.addView(review);
+
+        review.setOnClickListener(v -> {
+            try {
+                double e = Double.parseDouble(entry.getText().toString());
+                double s = Double.parseDouble(stop.getText().toString());
+                double t = Double.parseDouble(target.getText().toString());
+
+                double risk = Math.abs(e - s);
+                double reward = Math.abs(t - e);
+
+                if (risk == 0) {
+                    addMessage("Assistant", "Entry আৰু Stop Loss বেলেগ হ'ব লাগিব।");
+                    return;
+                }
+
+                double rr = reward / risk;
+
+                addMessage("Assistant",
+                    "Paper Trade Review\n" +
+                    "Risk: " + risk + "\n" +
+                    "Potential Reward: " + reward + "\n" +
+                    "Risk/Reward: 1:" + String.format("%.2f", rr) +
+                    "\nএইটো কেৱল শিক্ষামূলক গণনা, লাভৰ নিশ্চয়তা নহয়।");
+
+            } catch (Exception ex) {
+                addMessage("Assistant", "অনুগ্ৰহ কৰি Entry, SL আৰু TP-ত সঠিক সংখ্যা লিখক।");
             }
-            public void onNothingSelected(android.widget.AdapterView<?> p) {}
         });
 
-        label("Timeframe");
-        timeframe = spinner(frames);
-        add(timeframe);
-
-        Button analyze = button("ANALYZE MARKET");
-        add(analyze);
-
-        analysisText = new TextView(this);
-        analysisText.setTextSize(15);
-        add(analysisText);
-
-        analyze.setOnClickListener(v -> loadAnalysis());
-
-        label("PAPER TRADE CALCULATOR");
-
-        label("Direction");
-        direction = spinner(new String[]{"LONG","SHORT"});
-        add(direction);
-
-        label("Account Size (₹)");
-        account = edit("10000");
-
-        label("Entry Price");
-        entry = edit("");
-
-        label("Target Price");
-        target = edit("");
-
-        Button check = button("CHECK PAPER TRADE");
-        add(check);
-
-        resultText = new TextView(this);
-        resultText.setTextSize(16);
-        add(resultText);
-
-        check.setOnClickListener(v -> calculate());
-
-        label("অসমীয়া AI Help");
-
-        EditText question = edit("");
-        question.setHint("RSI, EMA, MACD, ATR, Risk আদি সোধক");
-
-        Button ask = button("ASK");
-        add(ask);
-
-        chatText = new TextView(this);
-        chatText.setTextSize(16);
-        add(chatText);
-
-        ask.setOnClickListener(v -> answer(question.getText().toString()));
-
-        label("সতৰ্কবাণী: এইটো শিক্ষামূলক Paper Analysis। ই real trading order নিদিয়ে।");
-        loadPrice();
+        getPrices();
     }
 
-    void add(View v) {
-        root.addView(v, new LinearLayout.LayoutParams(-1,-2));
-    }
-
-    void label(String s) {
+    void title(String text) {
         TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(15);
-        t.setTypeface(null,Typeface.BOLD);
-        t.setPadding(0,15,0,5);
-        add(t);
+        t.setText(text);
+        t.setTextSize(21);
+        t.setTypeface(null, Typeface.BOLD);
+        t.setTextColor(0xFFFFFFFF);
+        t.setPadding(5, 20, 5, 12);
+        main.addView(t);
     }
 
-    EditText edit(String s) {
-        EditText e = new EditText(this);
-        e.setSingleLine(true);
-        e.setText(s);
-        e.setInputType(8194);
-        add(e);
-        return e;
-    }
-
-    Spinner spinner(String[] data) {
-        Spinner s = new Spinner(this);
-        ArrayAdapter<String> a = new ArrayAdapter<>(
-            this, android.R.layout.simple_spinner_dropdown_item, data);
-        s.setAdapter(a);
-        return s;
-    }
-
-    Button button(String s) {
+    Button button(String text) {
         Button b = new Button(this);
-        b.setText(s);
+        b.setText(text);
         return b;
     }
 
-    void loadPrice() {
-        String symbol = market.getSelectedItem().toString();
-        priceText.setText("Loading " + symbol + "...");
-
-        executor.execute(() -> {
-            String result = "Price unavailable";
-            try {
-                JSONObject j = getJson(
-                    "https://api.binance.com/api/v3/ticker/price?symbol=" + symbol
-                );
-                result = symbol + "\nLive Price: " +
-                    j.getString("price") + " USDT";
-            } catch(Exception e) {
-                result = "Price unavailable. Internet/API check কৰক.";
-            }
-
-            String out = result;
-            handler.post(() -> priceText.setText(out));
-        });
+    EditText numberOrText(String hint) {
+        EditText e = new EditText(this);
+        e.setHint(hint);
+        e.setTextColor(0xFFFFFFFF);
+        e.setHintTextColor(0xFFBBBBBB);
+        e.setInputType(InputType.TYPE_CLASS_TEXT |
+                       InputType.TYPE_NUMBER_FLAG_DECIMAL |
+                       InputType.TYPE_NUMBER_FLAG_SIGNED);
+        e.setBackgroundColor(0xFF263238);
+        return e;
     }
 
-    JSONObject getJson(String address) throws Exception {
-        URL url = new URL(address);
-        HttpsURLConnection c =
-            (HttpsURLConnection) url.openConnection();
+    void addMessage(String who, String msg) {
+        TextView t = new TextView(this);
+        t.setText(who + ":\n" + msg);
+        t.setTextColor(0xFFFFFFFF);
+        t.setTextSize(16);
+        t.setPadding(12, 12, 12, 12);
+        chatBox.addView(t);
+    }
 
-        c.setConnectTimeout(10000);
-        c.setReadTimeout(10000);
-        c.setRequestMethod("GET");
+    void sendMessage() {
+        String msg = messageInput.getText().toString().trim();
+        if (msg.isEmpty()) return;
 
-        try {
-            BufferedReader r = new BufferedReader(
-                new InputStreamReader(c.getInputStream())
-            );
+        addMessage("You", msg);
+        messageInput.setText("");
 
-            StringBuilder sb = new StringBuilder();
-            String line;
+        String q = msg.toLowerCase();
 
-            while((line = r.readLine()) != null) {
-                sb.append(line);
-            }
-
-            r.close();
-            return new JSONObject(sb.toString());
-        } finally {
-            c.disconnect();
+        if (q.contains("hello") || q.contains("hi") ||
+            q.contains("নমস্কাৰ") || q.contains("নমস্কাৰ")) {
+            addMessage("Assistant", "নমস্কাৰ! আপোনাক কেনেকৈ সহায় কৰিব পাৰোঁ?");
+        }
+        else if (q.contains("rsi")) {
+            addMessage("Assistant", "RSI হৈছে Momentum Indicator। সাধাৰণতে 70-ৰ ওপৰত Overbought আৰু 30-ৰ তলত Oversold বুলি অধ্যয়ন কৰা হয়। ই অকলে Buy/Sell সংকেত নহয়।");
+        }
+        else if (q.contains("macd")) {
+            addMessage("Assistant", "MACD-এ দুটা EMA-ৰ পাৰ্থক্য আৰু Signal Line ব্যৱহাৰ কৰি Momentum বিশ্লেষণ কৰে।");
+        }
+        else if (q.contains("ema")) {
+            addMessage("Assistant", "EMA-ই সাম্প্ৰতিক মূল্যক অধিক গুৰুত্ব দি গড় মূল্য দেখুৱায়।");
+        }
+        else if (q.contains("btc") || q.contains("bitcoin")) {
+            addMessage("Assistant", "BTC-ৰ Live Price চাবলৈ ওপৰৰ Live Price Refresh বুটাম টিপক।");
+        }
+        else if (q.contains("eth") || q.contains("ethereum")) {
+            addMessage("Assistant", "ETH-ৰ Live Price চাবলৈ ওপৰৰ Live Price Refresh বুটাম টিপক।");
+        }
+        else if (q.contains("sol") || q.contains("solana")) {
+            addMessage("Assistant", "SOL-ৰ Live Price চাবলৈ ওপৰৰ Live Price Refresh বুটাম টিপক।");
+        }
+        else {
+            addMessage("Assistant",
+                "আপোনাৰ প্ৰশ্নটো পাইছোঁ। এই সংস্কৰণত সম্পূৰ্ণ AI Server সংযোগ হোৱা নাই। ChatGPT-ৰ দৰে স্বাভাৱিক উত্তৰৰ বাবে পিছৰ ধাপত AI Server সংযোগ কৰিম।");
         }
     }
 
-    void loadAnalysis() {
-        String symbol = market.getSelectedItem().toString();
-        String tf = timeframe.getSelectedItem().toString();
+    void getPrices() {
+        priceView.setText("Loading live prices...");
+        new Thread(() -> {
+            StringBuilder result = new StringBuilder();
 
-        analysisText.setText("Market data loading...");
-
-        executor.execute(() -> {
-            String result;
-
-            try {
-                String address =
-                    "https://api.binance.com/api/v3/klines?symbol=" +
-                    symbol + "&interval=" + tf + "&limit=100";
-
-                URL url = new URL(address);
-                HttpsURLConnection c =
-                    (HttpsURLConnection)url.openConnection();
-
-                c.setConnectTimeout(10000);
-                c.setReadTimeout(10000);
-
-                JSONArray data;
-
+            for (String coin : coins) {
                 try {
-                    BufferedReader r = new BufferedReader(
-                        new InputStreamReader(c.getInputStream())
+                    URL url = new URL(
+                        "https://api.binance.com/api/v3/ticker/price?symbol=" + coin
                     );
 
-                    StringBuilder sb = new StringBuilder();
-                    String line;
+                    HttpsURLConnection con =
+                        (HttpsURLConnection) url.openConnection();
 
-                    while((line = r.readLine()) != null) {
-                        sb.append(line);
-                    }
+                    con.setConnectTimeout(10000);
+                    con.setReadTimeout(10000);
 
-                    r.close();
-                    data = new JSONArray(sb.toString());
-                } finally {
-                    c.disconnect();
+                    BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(con.getInputStream())
+                    );
+
+                    String line = reader.readLine();
+                    JSONObject obj = new JSONObject(line);
+
+                    result.append(coin.replace("USDT", ""))
+                          .append(": $")
+                          .append(obj.getString("price"))
+                          .append("\n");
+
+                    reader.close();
+                    con.disconnect();
+
+                } catch (Exception ex) {
+                    result.append(coin).append(": Price unavailable\n");
                 }
-
-                double[] close = new double[data.length()];
-                double[] high = new double[data.length()];
-                double[] low = new double[data.length()];
-
-                for(int i=0; i<data.length(); i++) {
-                    JSONArray candle = data.getJSONArray(i);
-                    close[i] = candle.getDouble(4);
-                    high[i] = candle.getDouble(2);
-                    low[i] = candle.getDouble(3);
-                }
-
-                double ema9 = ema(close,9);
-                double ema21 = ema(close,21);
-                double rsi = rsi(close,14);
-                double atr = atr(high,low,close,14);
-
-                double last = close[close.length-1];
-
-                String trend = ema9 > ema21 ?
-                    "Bullish trend" : "Bearish trend";
-
-                String momentum = rsi > 70 ?
-                    "Overbought zone" :
-                    rsi < 30 ? "Oversold zone" : "Neutral zone";
-
-                result =
-                    "MARKET: " + symbol +
-                    "\nTIMEFRAME: " + tf +
-                    "\n\nLast Close: " + df.format(last) +
-                    "\nEMA 9: " + df.format(ema9) +
-                    "\nEMA 21: " + df.format(ema21) +
-                    "\nRSI 14: " + df.format(rsi) +
-                    "\nATR 14: " + df.format(atr) +
-                    "\n\nTrend: " + trend +
-                    "\nMomentum: " + momentum +
-                    "\n\nEMA/RSI/ATR are indicators, not guaranteed signals.";
-
-            } catch(Exception e) {
-                result = "Analysis unavailable.\nInternet/API পুনৰ পৰীক্ষা কৰক.";
             }
 
-            String out = result;
-            handler.post(() -> analysisText.setText(out));
-        });
-    }
+            handler.post(() -> priceView.setText(result.toString()));
 
-    double ema(double[] values, int period) {
-        double k = 2.0/(period+1);
-        double result = values[0];
-
-        for(int i=1;i<values.length;i++) {
-            result = values[i]*k + result*(1-k);
-        }
-        return result;
-    }
-
-    double rsi(double[] values, int period) {
-        double gain=0, loss=0;
-
-        for(int i=values.length-period;i<values.length;i++) {
-            double change = values[i]-values[i-1];
-
-            if(change>0) gain+=change;
-            else loss-=change;
-        }
-
-        if(loss==0) return 100;
-
-        double rs = (gain/period)/(loss/period);
-        return 100-(100/(1+rs));
-    }
-
-    double atr(double[] h,double[] l,double[] c,int period) {
-        double sum=0;
-
-        for(int i=h.length-period;i<h.length;i++) {
-            double tr=Math.max(
-                h[i]-l[i],
-                Math.max(
-                    Math.abs(h[i]-c[i-1]),
-                    Math.abs(l[i]-c[i-1])
-                )
-            );
-            sum+=tr;
-        }
-
-        return sum/period;
-    }
-
-    void calculate() {
-        try {
-            double a=Double.parseDouble(account.getText().toString());
-            double en=Double.parseDouble(entry.getText().toString());
-            double tg=Double.parseDouble(target.getText().toString());
-
-            if(a<=0 || en<=0 || tg<=0 || en==tg) {
-                throw new Exception();
-            }
-
-            String dir=direction.getSelectedItem().toString();
-
-            boolean valid = dir.equals("LONG") ? tg>en : tg<en;
-
-            if(!valid) {
-                resultText.setText("SKIP: Target direction ভুল হৈছে।");
-                return;
-            }
-
-            double risk=a*0.005;
-            double distance=Math.abs(tg-en);
-            double rr=distance/(en*0.01);
-
-            resultText.setText(
-                "PAPER CALCULATION" +
-                "\nEntry: "+df.format(en) +
-                "\nTarget: "+df.format(tg) +
-                "\nIllustrative Risk Budget: ₹"+df.format(risk) +
-                "\nReward Distance: "+df.format(distance) +
-                "\n\nএইটো পূৰ্ণ Stop Loss বা trade signal নহয়।"
-            );
-
-        } catch(Exception e) {
-            resultText.setText("সঠিক Account, Entry আৰু Target দিয়ক।");
-        }
-    }
-
-    void answer(String q) {
-        String s=q.toLowerCase().trim();
-
-        if(s.contains("rsi")) {
-            chatText.setText("RSI হৈছে momentum indicator। সাধাৰণতে 70-ৰ ওপৰত overbought আৰু 30-ৰ তলত oversold বুলি চোৱা হয়।");
-        } else if(s.contains("ema")) {
-            chatText.setText("EMA হৈছে Exponential Moving Average। ই price trend বুজাত সহায় কৰে।");
-        } else if(s.contains("macd")) {
-            chatText.setText("MACD হৈছে trend আৰু momentum indicator। Signal line আৰু histogram ব্যৱহাৰ কৰা হয়।");
-        } else if(s.contains("atr")) {
-            chatText.setText("ATR হৈছে Average True Range। ই market volatility মাপে।");
-        } else if(s.contains("risk")) {
-            chatText.setText("Risk management-ত account-ৰ সৰু অংশহে risk কৰা হয়। 0.5% of ₹10000 = ₹50।");
-        } else if(s.contains("hello") || s.contains("hi")) {
-            chatText.setText("নমস্কাৰ! আপোনাক Trading Assistant-লৈ স্বাগতম। কি জানিব বিচাৰে?");
-        } else if(s.contains("khobor")) {
-            chatText.setText("মই ভাল আছোঁ। আপোনাৰ কেনে আছে? আজি Market Analysis কৰিব পাৰোঁ।");
-        } else if(s.isEmpty()) {
-            chatText.setText("প্ৰশ্ন লিখক।");
-        } else {
-            chatText.setText("এইটো Offline Help সংস্কৰণ। এই প্ৰশ্নৰ উত্তৰৰ বাবে সম্পূৰ্ণ AI Backend সংযোগ কৰিব লাগিব।");
-        }
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        executor.shutdownNow();
+        }).start();
     }
 }
